@@ -5,7 +5,7 @@ import {
   smoothStream,
   streamText,
 } from 'ai';
-import { auth } from '@/app/(auth)/auth';
+import { auth } from '@clerk/nextjs/server'; 
 import { systemPrompt } from '@/lib/ai/prompts';
 import {
   deleteChatById,
@@ -40,11 +40,14 @@ export async function POST(request: Request) {
       selectedChatModel: string;
     } = await request.json();
 
-    const session = await auth();
+    const { userId } = await auth(); 
 
-    if (!session || !session.user || !session.user.id) {
+    if (!userId) { 
       return new Response('Unauthorized', { status: 401 });
     }
+
+    // TODO: Implement Just-in-Time User Sync: Check if userId exists in local DB,
+    // if not, fetch from Clerk and insert.
 
     const userMessage = getMostRecentUserMessage(messages);
 
@@ -59,9 +62,9 @@ export async function POST(request: Request) {
         message: userMessage,
       });
 
-      await saveChat({ id, userId: session.user.id, title });
+      await saveChat({ id, userId: userId, title }); 
     } else {
-      if (chat.userId !== session.user.id) {
+      if (chat.userId !== userId) { 
         return new Response('Unauthorized', { status: 401 });
       }
     }
@@ -98,16 +101,17 @@ export async function POST(request: Request) {
           experimental_transform: smoothStream({ chunking: 'word' }),
           experimental_generateMessageId: generateUUID,
           tools: {
-            getWeather,
-            createDocument: createDocument({ session, dataStream }),
-            updateDocument: updateDocument({ session, dataStream }),
+            getWeather, 
+            createDocument: createDocument({ userId, dataStream }),
+            updateDocument: updateDocument({ userId, dataStream }),
             requestSuggestions: requestSuggestions({
-              session,
+              userId,
               dataStream,
             }),
           },
           onFinish: async ({ response }) => {
-            if (session.user?.id) {
+            const { userId: finishUserId } = await auth();
+            if (finishUserId) {
               try {
                 const assistantId = getTrailingMessageId({
                   messages: response.messages.filter(
@@ -159,8 +163,9 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    console.error('Chat POST error:', error); 
     return new Response('An error occurred while processing your request!', {
-      status: 404,
+      status: 500, 
     });
   }
 }
@@ -173,16 +178,19 @@ export async function DELETE(request: Request) {
     return new Response('Not Found', { status: 404 });
   }
 
-  const session = await auth();
+  const { userId } = await auth(); 
 
-  if (!session || !session.user) {
+  if (!userId) { 
     return new Response('Unauthorized', { status: 401 });
   }
+
+  // TODO: Implement Just-in-Time User Sync: Check if userId exists in local DB,
+  // if not, fetch from Clerk and insert.
 
   try {
     const chat = await getChatById({ id });
 
-    if (chat.userId !== session.user.id) {
+    if (chat.userId !== userId) { 
       return new Response('Unauthorized', { status: 401 });
     }
 
@@ -190,6 +198,7 @@ export async function DELETE(request: Request) {
 
     return new Response('Chat deleted', { status: 200 });
   } catch (error) {
+    console.error('Chat DELETE error:', error); 
     return new Response('An error occurred while processing your request!', {
       status: 500,
     });

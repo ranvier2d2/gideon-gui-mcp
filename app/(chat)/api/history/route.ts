@@ -1,4 +1,4 @@
-import { auth } from '@/app/(auth)/auth';
+import { auth } from '@clerk/nextjs/server';
 import { NextRequest } from 'next/server';
 import { getChatsByUserId } from '@/lib/db/queries';
 
@@ -16,22 +16,26 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const session = await auth();
+  const { userId } = await auth();
 
-  if (!session?.user?.id) {
+  if (!userId) {
     return Response.json('Unauthorized!', { status: 401 });
   }
 
   try {
+    // TODO: Implement Just-in-Time User Sync: Check if userId exists in local DB,
+    // if not, fetch from Clerk and insert.
+
     const chats = await getChatsByUserId({
-      id: session.user.id,
+      id: userId,
       limit,
       startingAfter,
       endingBefore,
     });
 
     return Response.json(chats);
-  } catch (_) {
+  } catch (error) {
+    console.error('Failed to fetch chats:', error);
     return Response.json('Failed to fetch chats!', { status: 500 });
   }
 }

@@ -2,9 +2,10 @@ import { myProvider } from '@/lib/ai/providers';
 import { createDocumentHandler } from '@/lib/artifacts/server';
 import { experimental_generateImage } from 'ai';
 
-export const imageDocumentHandler = createDocumentHandler<'image'>({
+export const imageDocumentHandler = createDocumentHandler<'image'> ({
   kind: 'image',
-  onCreateDocument: async ({ title, dataStream }) => {
+  // Add userId to destructuring to match CreateDocumentCallbackProps
+  onCreateDocument: async ({ title, dataStream, userId }) => {
     let draftContent = '';
 
     const { image } = await experimental_generateImage({
@@ -22,7 +23,10 @@ export const imageDocumentHandler = createDocumentHandler<'image'>({
 
     return draftContent;
   },
-  onUpdateDocument: async ({ description, dataStream }) => {
+  // Add userId to destructuring to match UpdateDocumentCallbackProps
+  // Note: onUpdateDocument for image currently uses 'description' but UpdateDocumentCallbackProps provides 'document' and 'description'.
+  // We'll add userId, but this function might need review later if 'document' is needed.
+  onUpdateDocument: async ({ description, dataStream, userId }) => {
     let draftContent = '';
 
     const { image } = await experimental_generateImage({

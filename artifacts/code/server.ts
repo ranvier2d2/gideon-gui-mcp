@@ -4,9 +4,10 @@ import { myProvider } from '@/lib/ai/providers';
 import { codePrompt, updateDocumentPrompt } from '@/lib/ai/prompts';
 import { createDocumentHandler } from '@/lib/artifacts/server';
 
-export const codeDocumentHandler = createDocumentHandler<'code'>({
+export const codeDocumentHandler = createDocumentHandler<'code'> ({
   kind: 'code',
-  onCreateDocument: async ({ title, dataStream }) => {
+  // Add userId to destructuring to match CreateDocumentCallbackProps
+  onCreateDocument: async ({ title, dataStream, userId }) => {
     let draftContent = '';
 
     const { fullStream } = streamObject({
@@ -38,7 +39,8 @@ export const codeDocumentHandler = createDocumentHandler<'code'>({
 
     return draftContent;
   },
-  onUpdateDocument: async ({ document, description, dataStream }) => {
+  // Add userId to destructuring to match UpdateDocumentCallbackProps
+  onUpdateDocument: async ({ document, description, dataStream, userId }) => {
     let draftContent = '';
 
     const { fullStream } = streamObject({
