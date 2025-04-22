@@ -1,14 +1,18 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 
-// Define routes that should be protected
-const isProtectedRoute = createRouteMatcher([
-  '/', // Protect the root route
-  '/api/(.*)', // Protect all API routes
+// Define routes that should be publicly accessible
+const isPublicRoute = createRouteMatcher([
+  '/sign-in(.*)', // Clerk sign-in routes
+  '/sign-up(.*)', // Clerk sign-up routes
+  '/api/webhooks/clerk(.*)', // Clerk webhook handler
+  '/favicon.ico',
+  '/_next(.*)', // Next.js internal assets
 ]);
 
 export default clerkMiddleware((auth, req) => {
-  if (isProtectedRoute(req)) {
-    auth.protect(); // Protect the route if it matches
+  // Protect routes that are not public
+  if (!isPublicRoute(req)) {
+    auth.protect(); // Use auth object directly from handler argument
   }
 });
 
@@ -17,5 +21,5 @@ export const config = {
   // - /sign-in, /sign-up (Clerk default paths)
   // - /login, /register (potential old paths, might need removal later)
   // Matcher avoids running middleware on static files and _next internal paths.
-  matcher: ['/((?!.*\..*|_next).*)', '/', '/(api|trpc)(.*)'],
+  matcher: ['/((?!.*\.\w+|_next).*)', '/', '/(api|trpc)(.*)'],
 };

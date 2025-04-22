@@ -291,7 +291,14 @@ export async function saveDocument({
         userId,
         createdAt: new Date(),
       })
-      .returning();
+      .returning({ // Explicitly define returning columns
+        id: document.id,
+        createdAt: document.createdAt,
+        title: document.title,
+        content: document.content,
+        kind: document.kind, // Use schema name, Drizzle handles mapping if aliased correctly in select
+        userId: document.userId,
+      });
   } catch (error) {
     console.error('Failed to save document in database');
     throw error;
@@ -307,7 +314,14 @@ export async function getDocumentsById({
 }) {
   try {
     return await db
-      .select()
+      .select({ // Explicitly define selection
+        id: document.id,
+        createdAt: document.createdAt,
+        title: document.title,
+        content: document.content,
+        kind: document.kind, // Use schema name, Drizzle handles mapping if aliased correctly
+        userId: document.userId,
+      })
       .from(document)
       .where(and(inArray(document.id, ids), eq(document.userId, userId)))
       .orderBy(desc(document.createdAt));
@@ -326,7 +340,14 @@ export async function getDocumentById({
 }) {
   try {
     const [selectedDocument] = await db
-      .select()
+      .select({
+        id: document.id,
+        createdAt: document.createdAt,
+        title: document.title,
+        content: document.content,
+        kind: document.kind, // Explicitly select 'kind' field
+        userId: document.userId,
+      })
       .from(document)
       .where(and(eq(document.id, id), eq(document.userId, userId))) // Check both id and userId
       .limit(1);

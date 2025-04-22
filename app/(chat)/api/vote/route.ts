@@ -1,4 +1,4 @@
-import { auth } from '@/app/(auth)/auth';
+import { auth } from '@clerk/nextjs/server';
 import { getChatById, getVotesByChatId, voteMessage } from '@/lib/db/queries';
 
 export async function GET(request: Request) {
@@ -9,9 +9,10 @@ export async function GET(request: Request) {
     return new Response('chatId is required', { status: 400 });
   }
 
-  const session = await auth();
+  // Get userId from Clerk
+  const { userId } = await auth();
 
-  if (!session || !session.user || !session.user.email) {
+  if (!userId) {
     return new Response('Unauthorized', { status: 401 });
   }
 
@@ -21,7 +22,8 @@ export async function GET(request: Request) {
     return new Response('Chat not found', { status: 404 });
   }
 
-  if (chat.userId !== session.user.id) {
+  // Check if the authenticated user owns the chat
+  if (chat.userId !== userId) {
     return new Response('Unauthorized', { status: 401 });
   }
 
@@ -42,9 +44,10 @@ export async function PATCH(request: Request) {
     return new Response('messageId and type are required', { status: 400 });
   }
 
-  const session = await auth();
+  // Get userId from Clerk
+  const { userId } = await auth();
 
-  if (!session || !session.user || !session.user.email) {
+  if (!userId) {
     return new Response('Unauthorized', { status: 401 });
   }
 
@@ -54,7 +57,8 @@ export async function PATCH(request: Request) {
     return new Response('Chat not found', { status: 404 });
   }
 
-  if (chat.userId !== session.user.id) {
+  // Check if the authenticated user owns the chat
+  if (chat.userId !== userId) {
     return new Response('Unauthorized', { status: 401 });
   }
 
