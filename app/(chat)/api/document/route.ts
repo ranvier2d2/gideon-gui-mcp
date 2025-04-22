@@ -1,4 +1,4 @@
-import { auth } from '@/app/(auth)/auth';
+import { auth } from '@clerk/nextjs/server'; // Use Clerk auth
 import type { ArtifactKind } from '@/components/artifact';
 import {
   deleteDocumentsByIdAfterTimestamp,
@@ -14,13 +14,14 @@ export async function GET(request: Request) {
     return new Response('Missing id', { status: 400 });
   }
 
-  const session = await auth();
+  const authResult = await auth(); // Await Clerk auth
+  const userId = authResult?.userId; // Get userId from result
 
-  if (!session?.user?.id) {
+  if (!userId) { // Check userId directly
     return new Response('Unauthorized', { status: 401 });
   }
 
-  const documents = await getDocumentsById({ id });
+  const documents = await getDocumentsById({ ids: [id], userId });
 
   const [document] = documents;
 
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
     return new Response('Not found', { status: 404 });
   }
 
-  if (document.userId !== session.user.id) {
+  if (document.userId !== userId) { // Use userId for comparison
     return new Response('Forbidden', { status: 403 });
   }
 
@@ -43,9 +44,10 @@ export async function POST(request: Request) {
     return new Response('Missing id', { status: 400 });
   }
 
-  const session = await auth();
+  const authResult = await auth(); // Await Clerk auth
+  const userId = authResult?.userId; // Get userId from result
 
-  if (!session?.user?.id) {
+  if (!userId) { // Check userId directly
     return new Response('Unauthorized', { status: 401 });
   }
 
@@ -56,12 +58,12 @@ export async function POST(request: Request) {
   }: { content: string; title: string; kind: ArtifactKind } =
     await request.json();
 
-  const documents = await getDocumentsById({ id });
+  const documents = await getDocumentsById({ ids: [id], userId });
 
   if (documents.length > 0) {
     const [document] = documents;
 
-    if (document.userId !== session.user.id) {
+    if (document.userId !== userId) { // Use userId for comparison
       return new Response('Forbidden', { status: 403 });
     }
   }
@@ -71,7 +73,7 @@ export async function POST(request: Request) {
     content,
     title,
     kind,
-    userId: session.user.id,
+    userId: userId, // Use userId from Clerk
   });
 
   return Response.json(document, { status: 200 });
@@ -90,23 +92,25 @@ export async function DELETE(request: Request) {
     return new Response('Missing timestamp', { status: 400 });
   }
 
-  const session = await auth();
+  const authResult = await auth(); // Await Clerk auth
+  const userId = authResult?.userId; // Get userId from result
 
-  if (!session?.user?.id) {
+  if (!userId) { // Check userId directly
     return new Response('Unauthorized', { status: 401 });
   }
 
-  const documents = await getDocumentsById({ id });
+  const documents = await getDocumentsById({ ids: [id], userId });
 
   const [document] = documents;
 
-  if (document.userId !== session.user.id) {
+  if (document.userId !== userId) { // Use userId for comparison
     return new Response('Unauthorized', { status: 401 });
   }
 
   const documentsDeleted = await deleteDocumentsByIdAfterTimestamp({
     id,
     timestamp: new Date(timestamp),
+    userId: userId, // Use userId from Clerk
   });
 
   return Response.json(documentsDeleted, { status: 200 });

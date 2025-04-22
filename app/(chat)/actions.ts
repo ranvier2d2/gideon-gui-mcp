@@ -1,6 +1,7 @@
 'use server';
 
 import { generateText, Message } from 'ai';
+import { auth } from '@clerk/nextjs/server';
 import { cookies } from 'next/headers';
 
 import {
@@ -35,11 +36,19 @@ export async function generateTitleFromUserMessage({
 }
 
 export async function deleteTrailingMessages({ id }: { id: string }) {
-  const [message] = await getMessageById({ id });
+  const { userId } = await auth();
+
+  if (!userId) {
+    console.error('Unauthorized attempt to delete trailing messages.');
+    throw new Error('Unauthorized');
+  }
+
+  const message = await getMessageById({ id, userId });
 
   await deleteMessagesByChatIdAfterTimestamp({
     chatId: message.chatId,
     timestamp: message.createdAt,
+    userId,
   });
 }
 
@@ -50,5 +59,17 @@ export async function updateChatVisibility({
   chatId: string;
   visibility: VisibilityType;
 }) {
-  await updateChatVisiblityById({ chatId, visibility });
+  const authResult = await auth();
+  const userId = authResult?.userId;
+
+  if (!userId) {
+    console.error('Unauthorized attempt to update chat visibility.');
+    throw new Error('Unauthorized');
+  }
+
+  await updateChatVisiblityById({
+    id: chatId,
+    visibility,
+    userId,
+  });
 }

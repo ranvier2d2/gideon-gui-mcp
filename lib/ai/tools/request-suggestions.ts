@@ -19,7 +19,7 @@ export const requestSuggestions = ({ userId, dataStream }: RequestSuggestionsPro
         .describe('The ID of the document to request edits'),
     }),
     execute: async ({ documentId }) => {
-      const document = await getDocumentById({ id: documentId });
+      const document = await getDocumentById({ id: documentId, userId });
 
       if (!document || !document.content) {
         return {

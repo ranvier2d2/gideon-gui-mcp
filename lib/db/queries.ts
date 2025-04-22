@@ -46,14 +46,44 @@ export async function getUser(email: string): Promise<Array<User>> {
   }
 }
 
-export async function createUser(email: string, password: string) {
+export async function getUserById({ id }: { id: string }): Promise<User | undefined> {
+  try {
+    const result = await db.select().from(user).where(eq(user.id, id)).limit(1);
+    return result[0]; // Return the first user found or undefined
+  } catch (error) {
+    console.error('Failed to get user by id from database');
+    throw error;
+  }
+}
+
+export async function createLocalUser(email: string, password: string) {
   const salt = genSaltSync(10);
   const hash = hashSync(password, salt);
 
   try {
-    return await db.insert(user).values({ email, password: hash });
+    // Use returning() to get the inserted user data if needed
+    return await db.insert(user).values({ email, password: hash }).returning();
   } catch (error) {
-    console.error('Failed to create user in database');
+    console.error('Failed to create local user in database');
+    throw error;
+  }
+}
+
+export async function createClerkUser({ id, email }: { id: string, email: string }) {
+  try {
+    // Insert user with id and email, password remains null (its default or omitted)
+    // Use returning() to get the inserted user data if needed
+    return await db.insert(user).values({ id, email }).returning();
+    // Consider adding onConflictDoUpdate if emails might change in Clerk and need syncing
+    /*
+    return await db.insert(user)
+      .values({ id, email })
+      .onConflict(user.id)
+      .doUpdate({ set: { email: email } })
+      .returning();
+    */
+  } catch (error) {
+    console.error('Failed to create clerk user in database');
     throw error;
   }
 }
@@ -268,28 +298,38 @@ export async function saveDocument({
   }
 }
 
-export async function getDocumentsById({ id }: { id: string }) {
+export async function getDocumentsById({
+  ids,
+  userId,
+}: {
+  ids: string[];
+  userId: string;
+}) {
   try {
-    const documents = await db
+    return await db
       .select()
       .from(document)
-      .where(eq(document.id, id))
-      .orderBy(asc(document.createdAt));
-
-    return documents;
+      .where(and(inArray(document.id, ids), eq(document.userId, userId)))
+      .orderBy(desc(document.createdAt));
   } catch (error) {
-    console.error('Failed to get document by id from database');
+    console.error('Failed to get documents by id from database');
     throw error;
   }
 }
 
-export async function getDocumentById({ id }: { id: string }) {
+export async function getDocumentById({
+  id,
+  userId, // Add userId parameter
+}: {
+  id: string;
+  userId: string; // Add userId type
+}) {
   try {
     const [selectedDocument] = await db
       .select()
       .from(document)
-      .where(eq(document.id, id))
-      .orderBy(desc(document.createdAt));
+      .where(and(eq(document.id, id), eq(document.userId, userId))) // Check both id and userId
+      .limit(1);
 
     return selectedDocument;
   } catch (error) {
@@ -301,11 +341,16 @@ export async function getDocumentById({ id }: { id: string }) {
 export async function deleteDocumentsByIdAfterTimestamp({
   id,
   timestamp,
+  userId, // Add userId parameter
 }: {
   id: string;
   timestamp: Date;
+  userId: string; // Add userId type definition
 }) {
   try {
+    // NOTE: Deleting suggestions first based only on documentId and timestamp.
+    // This implicitly relies on the document delete check below to ensure authorization.
+    // If suggestions had their own userId column, we'd check it here too.
     await db
       .delete(suggestion)
       .where(
@@ -317,7 +362,13 @@ export async function deleteDocumentsByIdAfterTimestamp({
 
     return await db
       .delete(document)
-      .where(and(eq(document.id, id), gt(document.createdAt, timestamp)))
+      .where(
+        and(
+          eq(document.id, id),
+          eq(document.userId, userId), // Add userId check
+          gt(document.createdAt, timestamp),
+        ),
+      )
       .returning();
   } catch (error) {
     console.error(
@@ -342,10 +393,26 @@ export async function saveSuggestions({
 
 export async function getSuggestionsByDocumentId({
   documentId,
+  userId, // Add userId parameter
 }: {
   documentId: string;
+  userId: string; // Add userId type
 }) {
   try {
+    // First, verify the user owns the document
+    const doc = await getDocumentById({ id: documentId, userId });
+
+    if (!doc) {
+      // Document not found or user does not have access
+      console.warn(
+        `Attempt to get suggestions for document ${documentId} failed. Document not found or user ${userId} unauthorized.`,
+      );
+      // Return empty array or throw error based on desired behavior
+      return []; // Return empty array for now
+      // Alternatively: throw new Error('Document not found or unauthorized');
+    }
+
+    // Proceed with fetching suggestions since ownership is verified
     return await db
       .select()
       .from(suggestion)
@@ -358,9 +425,31 @@ export async function getSuggestionsByDocumentId({
   }
 }
 
-export async function getMessageById({ id }: { id: string }) {
+export async function getMessageById({
+  id,
+  userId,
+}: {
+  id: string;
+  userId: string;
+}) {
   try {
-    return await db.select().from(message).where(eq(message.id, id));
+    // Join with chat table to verify ownership via userId
+    const result = await db
+      .select({
+        // Select only message fields explicitly
+        id: message.id,
+        chatId: message.chatId,
+        role: message.role,
+        parts: message.parts,
+        attachments: message.attachments,
+        createdAt: message.createdAt,
+      })
+      .from(message)
+      .innerJoin(chat, eq(message.chatId, chat.id))
+      .where(and(eq(message.id, id), eq(chat.userId, userId)))
+      .limit(1);
+
+    return result[0]; // Return the first message found or undefined
   } catch (error) {
     console.error('Failed to get message by id from database');
     throw error;
@@ -370,11 +459,28 @@ export async function getMessageById({ id }: { id: string }) {
 export async function deleteMessagesByChatIdAfterTimestamp({
   chatId,
   timestamp,
+  userId, // Add userId parameter
 }: {
   chatId: string;
   timestamp: Date;
+  userId: string; // Add userId type
 }) {
   try {
+    // First, verify the user owns the chat
+    const chatToVerify = await getChatById({ id: chatId });
+
+    if (!chatToVerify) {
+      // Or handle as appropriate - maybe just return silently?
+      throw new Error(`Chat not found: ${chatId}`);
+    }
+
+    if (chatToVerify.userId !== userId) {
+      // Prevent unauthorized deletion
+      console.error(`User ${userId} attempted to delete messages from chat ${chatId} owned by ${chatToVerify.userId}`);
+      throw new Error('Unauthorized: User does not own this chat');
+    }
+
+    // Proceed with deletion since ownership is verified
     const messagesToDelete = await db
       .select({ id: message.id })
       .from(message)
@@ -406,14 +512,20 @@ export async function deleteMessagesByChatIdAfterTimestamp({
 }
 
 export async function updateChatVisiblityById({
-  chatId,
+  id,
   visibility,
+  userId, // Add userId parameter
 }: {
-  chatId: string;
+  id: string;
   visibility: 'private' | 'public';
+  userId: string; // Add userId type
 }) {
   try {
-    return await db.update(chat).set({ visibility }).where(eq(chat.id, chatId));
+    return await db
+      .update(chat)
+      .set({ visibility })
+      .where(and(eq(chat.id, id), eq(chat.userId, userId))) // Check both id and userId
+      .returning();
   } catch (error) {
     console.error('Failed to update chat visibility in database');
     throw error;

@@ -4,9 +4,10 @@ import { createDocumentHandler } from '@/lib/artifacts/server';
 import { streamObject } from 'ai';
 import { z } from 'zod';
 
-export const sheetDocumentHandler = createDocumentHandler<'sheet'>({
+export const sheetDocumentHandler = createDocumentHandler<'sheet'> ({
   kind: 'sheet',
-  onCreateDocument: async ({ title, dataStream }) => {
+  // Add userId to destructuring to match CreateDocumentCallbackProps
+  onCreateDocument: async ({ title, dataStream, userId }) => {
     let draftContent = '';
 
     const { fullStream } = streamObject({
@@ -43,7 +44,8 @@ export const sheetDocumentHandler = createDocumentHandler<'sheet'>({
 
     return draftContent;
   },
-  onUpdateDocument: async ({ document, description, dataStream }) => {
+  // Add userId to destructuring to match UpdateDocumentCallbackProps
+  onUpdateDocument: async ({ document, description, dataStream, userId }) => {
     let draftContent = '';
 
     const { fullStream } = streamObject({

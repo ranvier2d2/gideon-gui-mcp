@@ -5,11 +5,13 @@ import {
   smoothStream,
   streamText,
 } from 'ai';
-import { auth } from '@clerk/nextjs/server'; 
+import { auth, clerkClient } from '@clerk/nextjs/server'; 
 import { systemPrompt } from '@/lib/ai/prompts';
 import {
   deleteChatById,
   getChatById,
+  getUserById,
+  createClerkUser,
   saveChat,
   saveMessages,
 } from '@/lib/db/queries';
@@ -46,8 +48,32 @@ export async function POST(request: Request) {
       return new Response('Unauthorized', { status: 401 });
     }
 
-    // TODO: Implement Just-in-Time User Sync: Check if userId exists in local DB,
-    // if not, fetch from Clerk and insert.
+    // --- JIT User Synchronization Start ---
+    let localUser = await getUserById({ id: userId });
+
+    if (!localUser) {
+      console.log(`User ${userId} not found locally. Fetching from Clerk...`);
+      try {
+        const clerkUser = await (await clerkClient()).users.getUser(userId);
+
+        const primaryEmail = clerkUser.emailAddresses.find(
+          (email: { id: string; emailAddress: string }) => email.id === clerkUser.primaryEmailAddressId
+        )?.emailAddress;
+
+        if (!primaryEmail) {
+          console.error(`Primary email not found for Clerk user ${userId}`);
+          return Response.json('User profile incomplete', { status: 500 });
+        }
+
+        console.log(`Creating user ${userId} with email ${primaryEmail} locally...`);
+        await createClerkUser({ id: userId, email: primaryEmail });
+
+      } catch (syncError) {
+        console.error(`Failed to sync user ${userId}:`, syncError);
+        return Response.json('Failed to synchronize user data', { status: 500 });
+      }
+    }
+    // --- JIT User Synchronization End ---
 
     const userMessage = getMostRecentUserMessage(messages);
 
@@ -184,8 +210,32 @@ export async function DELETE(request: Request) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  // TODO: Implement Just-in-Time User Sync: Check if userId exists in local DB,
-  // if not, fetch from Clerk and insert.
+  // --- JIT User Synchronization Start ---
+  let localUserDelete = await getUserById({ id: userId }); 
+
+  if (!localUserDelete) {
+    console.log(`User ${userId} not found locally. Fetching from Clerk...`);
+    try {
+      const clerkUser = await (await clerkClient()).users.getUser(userId);
+
+      const primaryEmail = clerkUser.emailAddresses.find(
+        (email: { id: string; emailAddress: string }) => email.id === clerkUser.primaryEmailAddressId
+      )?.emailAddress;
+
+      if (!primaryEmail) {
+        console.error(`Primary email not found for Clerk user ${userId}`);
+        return Response.json('User profile incomplete', { status: 500 });
+      }
+
+      console.log(`Creating user ${userId} with email ${primaryEmail} locally...`);
+      await createClerkUser({ id: userId, email: primaryEmail });
+
+    } catch (syncError) {
+      console.error(`Failed to sync user ${userId}:`, syncError);
+      return Response.json('Failed to synchronize user data', { status: 500 });
+    }
+  }
+  // --- JIT User Synchronization End ---
 
   try {
     const chat = await getChatById({ id });
