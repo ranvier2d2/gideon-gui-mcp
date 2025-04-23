@@ -4,9 +4,12 @@ import {
   createDataStreamResponse,
   smoothStream,
   streamText,
+  CoreTool, // Import CoreTool from 'ai'
+  experimental_createMCPClient, // Revert source to 'ai'
 } from 'ai';
+import { Experimental_StdioMCPTransport } from 'ai/mcp-stdio'; // Source is 'ai/mcp-stdio'
 import { auth, clerkClient } from '@clerk/nextjs/server'; 
-import { systemPrompt } from '@/lib/ai/prompts';
+import { systemPrompt, gideonMCPSystemPrompt } from '@/lib/ai/prompts';
 import {
   deleteChatById,
   getChatById,
@@ -27,6 +30,20 @@ import { requestSuggestions } from '@/lib/ai/tools/request-suggestions';
 import { getWeather } from '@/lib/ai/tools/get-weather';
 import { isProductionEnvironment } from '@/lib/constants';
 import { myProvider } from '@/lib/ai/providers';
+import { createOpenAI } from '@ai-sdk/openai'; // Added import
+
+// Define MCP Tool Descriptions (Placeholder - ideally fetch dynamically)
+const mcpToolDescriptions: Record<string, string> = {
+  'semantic-scholar-search': 'Performs a search on Semantic Scholar for academic papers.',
+  'store-patient-note': 'Stores a patient note.',
+  'web-search': 'Performs a web search using Brave Search API.',
+  'bayesian-update': 'Calculates posterior probability using Bayes theorem.',
+  'likelihood-ratio': 'Calculates positive and negative likelihood ratios.',
+  'generate-decision-tree': 'Generates a diagnostic decision tree based on hypotheses and tests.',
+  'compare-hypotheses': 'Compares hypotheses based on evidence.',
+  'optimize-test-sequence': 'Optimizes the sequence of diagnostic tests.',
+  'evaluate-intervention-window': 'Evaluates the therapeutic window for a condition.',
+};
 
 export const maxDuration = 60;
 
@@ -81,7 +98,7 @@ export async function POST(request: Request) {
       return new Response('No user message found', { status: 400 });
     }
 
-    const chat = await getChatById({ id });
+    const chat = await getChatById({ id, userId });
 
     if (!chat) {
       const title = await generateTitleFromUserMessage({
@@ -108,33 +125,81 @@ export async function POST(request: Request) {
       ],
     });
 
+    let mcpClient: any = null; // Declare outside for closure access
+
     return createDataStreamResponse({
-      execute: (dataStream) => {
+      execute: async (dataStream) => { // Make callback async
+        let mcpToolsFormatted: Record<string, any> = {};
+
+        // --- Try connecting to MCP Server and fetching tools --- 
+        try {
+          const mcpServerScriptPath = process.env.MCP_SERVER_SCRIPT_PATH;
+
+          if (!mcpServerScriptPath) {
+            console.warn('MCP_SERVER_SCRIPT_PATH environment variable not set. Skipping MCP tools.');
+          } else {
+            const braveApiKey = process.env.BRAVE_API_KEY;
+            if (!braveApiKey) {
+              throw new Error('BRAVE_API_KEY environment variable not set for MCP.');
+            }
+
+            const mcpEnv = {
+              ...process.env,
+              BRAVE_API_KEY: braveApiKey,
+            };
+
+            const transport = new Experimental_StdioMCPTransport({
+              command: 'npx',
+              args: ['-y', 'tsx', mcpServerScriptPath],
+              env: mcpEnv,
+            });
+
+            mcpClient = await experimental_createMCPClient({ transport });
+            const rawMcpTools = await mcpClient.tools();
+
+            // Debug logs for fetched tools
+            console.log('Raw tools received from mcpClient.tools():');
+            console.dir(rawMcpTools, { depth: null });
+            console.log('Fetched tool names from MCP server:', Object.keys(rawMcpTools));
+
+            // Assign MCP tools directly (format seems compatible)
+            mcpToolsFormatted = rawMcpTools;
+          }
+        } catch (mcpError) {
+          console.error('Failed to connect to MCP server or fetch/format tools:', mcpError);
+          console.log('Proceeding with only local tools.');
+          // Ensure mcpClient is nullified if connection failed
+          if (mcpClient) {
+             try { await mcpClient.close(); } catch (e) { /* ignore */ }
+             mcpClient = null;
+          }
+        }
+
+        // --- Define Local Tools (now with dataStream) --- 
+        const localToolsWithStream = {
+          getWeather, // Assuming getWeather doesn't need dataStream
+          createDocument: createDocument({ userId, dataStream }),
+          updateDocument: updateDocument({ userId, dataStream }),
+          requestSuggestions: requestSuggestions({ userId, dataStream }),
+        };
+
+        // --- Merge All Tools --- 
+        const allTools = {
+          ...localToolsWithStream,
+          ...mcpToolsFormatted, 
+        };
+
+        console.log('Merged tool names being passed to streamText:', Object.keys(allTools));
+
+        // --- Execute streamText --- 
         const result = streamText({
-          model: myProvider.languageModel(selectedChatModel),
-          system: systemPrompt({ selectedChatModel }),
+          model: myProvider.languageModel(selectedChatModel), // Fixed method name
+          system: `${systemPrompt({ selectedChatModel })}\n\n${gideonMCPSystemPrompt}`,
           messages,
           maxSteps: 5,
-          experimental_activeTools:
-            selectedChatModel === 'chat-model-reasoning'
-              ? []
-              : [
-                  'getWeather',
-                  'createDocument',
-                  'updateDocument',
-                  'requestSuggestions',
-                ],
           experimental_transform: smoothStream({ chunking: 'word' }),
           experimental_generateMessageId: generateUUID,
-          tools: {
-            getWeather, 
-            createDocument: createDocument({ userId, dataStream }),
-            updateDocument: updateDocument({ userId, dataStream }),
-            requestSuggestions: requestSuggestions({
-              userId,
-              dataStream,
-            }),
-          },
+          tools: allTools,
           onFinish: async ({ response }) => {
             const { userId: finishUserId } = await auth();
             if (finishUserId) {
@@ -171,23 +236,43 @@ export async function POST(request: Request) {
                 console.error('Failed to save chat');
               }
             }
+
+            // --- Close MCP Client (if open) --- 
+            if (mcpClient) {
+              try {
+                await mcpClient.close();
+                console.log('MCP client closed successfully.');
+              } catch (closeError) {
+                console.error('Error closing MCP client:', closeError);
+              }
+            }
           },
           experimental_telemetry: {
             isEnabled: isProductionEnvironment,
             functionId: 'stream-text',
           },
-        });
+        }); // End of streamText
 
-        result.consumeStream();
+        // --- Stream Handling --- 
+        result.consumeStream(); 
+        result.mergeIntoDataStream(dataStream, { sendReasoning: true });
 
-        result.mergeIntoDataStream(dataStream, {
-          sendReasoning: true,
+        // --- Abort Handling --- 
+        request.signal?.addEventListener('abort', async () => {
+          if (mcpClient) {
+            try {
+              await mcpClient.close();
+              console.log('MCP client closed due to request abort.');
+            } catch (abortCloseError) {
+              console.error('Error closing MCP client on abort:', abortCloseError);
+            }
+          }
         });
-      },
+      }, // End of execute callback
       onError: () => {
         return 'Oops, an error occurred!';
       },
-    });
+    }); // End of createDataStreamResponse
   } catch (error) {
     console.error('Chat POST error:', error); 
     return new Response('An error occurred while processing your request!', {
@@ -238,10 +323,10 @@ export async function DELETE(request: Request) {
   // --- JIT User Synchronization End ---
 
   try {
-    const chat = await getChatById({ id });
+    const chatToDelete = await getChatById({ id, userId });
 
-    if (chat.userId !== userId) { 
-      return new Response('Unauthorized', { status: 401 });
+    if (!chatToDelete) {
+      return new Response('Chat not found or unauthorized', { status: 404 });
     }
 
     await deleteChatById({ id });

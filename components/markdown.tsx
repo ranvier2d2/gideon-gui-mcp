@@ -5,9 +5,9 @@ import remarkGfm from 'remark-gfm';
 import { CodeBlock } from './code-block';
 
 const components: Partial<Components> = {
-  // @ts-expect-error
-  code: CodeBlock,
-  pre: ({ children }) => <>{children}</>,
+  // Map 'pre' to CodeBlock to handle the entire code block structure
+  // @ts-expect-error - Likely needs props adjustment in CodeBlock if issues persist
+  pre: CodeBlock,
   ol: ({ node, children, ...props }) => {
     return (
       <ol className="list-decimal list-outside ml-4" {...props}>

@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  const chat = await getChatById({ id: chatId });
+  const chat = await getChatById({ id: chatId, userId });
 
   if (!chat) {
     return new Response('Chat not found', { status: 404 });
@@ -51,7 +51,7 @@ export async function PATCH(request: Request) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  const chat = await getChatById({ id: chatId });
+  const chat = await getChatById({ id: chatId, userId });
 
   if (!chat) {
     return new Response('Chat not found', { status: 404 });
@@ -62,11 +62,10 @@ export async function PATCH(request: Request) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  await voteMessage({
-    chatId,
-    messageId,
-    type: type,
-  });
-
-  return new Response('Message voted', { status: 200 });
+  try {
+    await voteMessage({ chatId, messageId, type, userId });
+    return new Response(null, { status: 200 });
+  } catch (error) {
+    console.error('Error voting on message:', error);
+  }
 }

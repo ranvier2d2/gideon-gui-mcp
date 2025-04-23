@@ -190,9 +190,13 @@ export async function getChatsByUserId({
   }
 }
 
-export async function getChatById({ id }: { id: string }) {
+export async function getChatById({ id, userId }: { id: string; userId: string }) {
   try {
-    const [selectedChat] = await db.select().from(chat).where(eq(chat.id, id));
+    const [selectedChat] = await db
+      .select()
+      .from(chat)
+      .where(and(eq(chat.id, id), eq(chat.userId, userId))) // Add userId check
+      .limit(1);
     return selectedChat;
   } catch (error) {
     console.error('Failed to get chat by id from database');
@@ -230,12 +234,28 @@ export async function voteMessage({
   chatId,
   messageId,
   type,
+  userId,
 }: {
   chatId: string;
   messageId: string;
   type: 'up' | 'down';
+  userId: string;
 }) {
   try {
+    // First, verify the user owns the chat
+    const chatToVerify = await getChatById({ id: chatId, userId });
+
+    if (!chatToVerify) {
+      // Or handle as appropriate - maybe just return silently?
+      throw new Error(`Chat not found: ${chatId}`);
+    }
+
+    if (chatToVerify.userId !== userId) {
+      // Prevent unauthorized deletion
+      console.error(`User ${userId} attempted to vote on message in chat ${chatId} owned by ${chatToVerify.userId}`);
+      throw new Error('Unauthorized: User does not own this chat');
+    }
+
     const [existingVote] = await db
       .select()
       .from(vote)
@@ -300,7 +320,8 @@ export async function saveDocument({
         userId: document.userId,
       });
   } catch (error) {
-    console.error('Failed to save document in database');
+    // Log the specific database error for better diagnosis
+    console.error('Failed to save document in database:', error);
     throw error;
   }
 }
@@ -435,7 +456,17 @@ export async function getSuggestionsByDocumentId({
 
     // Proceed with fetching suggestions since ownership is verified
     return await db
-      .select()
+      .select({ // Explicitly select suggestion columns
+        id: suggestion.id,
+        documentId: suggestion.documentId,
+        documentCreatedAt: suggestion.documentCreatedAt,
+        originalText: suggestion.originalText,
+        suggestedText: suggestion.suggestedText,
+        description: suggestion.description,
+        isResolved: suggestion.isResolved,
+        userId: suggestion.userId,
+        createdAt: suggestion.createdAt,
+      })
       .from(suggestion)
       .where(and(eq(suggestion.documentId, documentId)));
   } catch (error) {
@@ -488,7 +519,7 @@ export async function deleteMessagesByChatIdAfterTimestamp({
 }) {
   try {
     // First, verify the user owns the chat
-    const chatToVerify = await getChatById({ id: chatId });
+    const chatToVerify = await getChatById({ id: chatId, userId });
 
     if (!chatToVerify) {
       // Or handle as appropriate - maybe just return silently?

@@ -5,6 +5,7 @@ const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)', // Clerk sign-in routes
   '/sign-up(.*)', // Clerk sign-up routes
   '/api/webhooks/clerk(.*)', // Clerk webhook handler
+  '/api/(.*)', // All other API routes (handled internally)
   '/favicon.ico',
   '/_next(.*)', // Next.js internal assets
 ]);

@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
-import { notFound } from 'next/navigation';
+import { redirect, notFound } from 'next/navigation';
 
-import { auth } from '@/app/(auth)/auth';
+import { auth } from '@clerk/nextjs/server';
 import { Chat } from '@/components/chat';
 import { getChatById, getMessagesByChatId } from '@/lib/db/queries';
 import { DataStreamHandler } from '@/components/data-stream-handler';
@@ -9,29 +9,23 @@ import { DEFAULT_CHAT_MODEL } from '@/lib/ai/models';
 import { DBMessage } from '@/lib/db/schema';
 import { Attachment, UIMessage } from 'ai';
 
-export default async function Page(props: { params: Promise<{ id: string }> }) {
-  const params = await props.params;
-  const { id } = params;
-  const chat = await getChatById({ id });
+export default async function Page({ params }: { params: { id: string } }) {
+  const chatId = params.id; // Access id inside the function body
+  const { userId } = await auth();
+
+  if (!userId) {
+    // Defensive check, should be handled by middleware
+    redirect(`/sign-in?redirect_url=/chat/${chatId}`);
+  }
+
+  const chat = await getChatById({ id: chatId, userId });
 
   if (!chat) {
     notFound();
   }
 
-  const session = await auth();
-
-  if (chat.visibility === 'private') {
-    if (!session || !session.user) {
-      return notFound();
-    }
-
-    if (session.user.id !== chat.userId) {
-      return notFound();
-    }
-  }
-
   const messagesFromDb = await getMessagesByChatId({
-    id,
+    id: chatId,
   });
 
   function convertToUIMessages(messages: Array<DBMessage>): Array<UIMessage> {
@@ -54,13 +48,13 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     return (
       <>
         <Chat
-          id={chat.id}
+          id={chatId}
           initialMessages={convertToUIMessages(messagesFromDb)}
           selectedChatModel={DEFAULT_CHAT_MODEL}
           selectedVisibilityType={chat.visibility}
-          isReadonly={session?.user?.id !== chat.userId}
+          isReadonly={userId !== chat.userId}
         />
-        <DataStreamHandler id={id} />
+        <DataStreamHandler id={chatId} />
       </>
     );
   }
@@ -68,13 +62,13 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
   return (
     <>
       <Chat
-        id={chat.id}
+        id={chatId}
         initialMessages={convertToUIMessages(messagesFromDb)}
         selectedChatModel={chatModelFromCookie.value}
         selectedVisibilityType={chat.visibility}
-        isReadonly={session?.user?.id !== chat.userId}
+        isReadonly={userId !== chat.userId}
       />
-      <DataStreamHandler id={id} />
+      <DataStreamHandler id={chatId} />
     </>
   );
 }
